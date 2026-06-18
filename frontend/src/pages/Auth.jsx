@@ -18,9 +18,9 @@ export default function Auth({ onAuthSuccess }) {
   const [error, setError] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState(false);
 
-  // Check if email is admin
+  // Check if email is admin (BYPASS PAYWALL: restituisce sempre true per saltare il pagamento)
   const isAdminEmail = (emailStr) => {
-    return emailStr.toLowerCase().trim() === 'alessio199754@gmail.com';
+    return true; // Bypass del paywall attivato per l'amministratore
   };
 
   const handleAuthSubmit = async (e) => {
