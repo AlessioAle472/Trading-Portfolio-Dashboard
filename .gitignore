@@ -1,0 +1,35 @@
+# Dipendenze Node.js
+node_modules/
+npm-debug.log*
+
+# Build Vite
+frontend/dist/
+frontend/.vite/
+
+# File dati sensibili e temporanei
+backend/data/reports/*.json
+backend/data/mt5_deals.json
+backend/data/portfolio.json
+backend/data/users.json
+backend/data/minusvalenze_*.json
+backend/data/groups_*.json
+backend/data/temp_deals_*.json
+backend/data/temp_tasse_*.json
+
+# File di configurazione locali
+*.env
+.env.local
+.env.*.local
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+*.egg-info/
+
+# Log
+*.log
+logs/
