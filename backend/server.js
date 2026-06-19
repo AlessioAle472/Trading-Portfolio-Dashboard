@@ -1,4 +1,7 @@
+require('dotenv').config();
 const express = require('express');
+const Stripe = require('stripe');
+const stripe = Stripe(process.env.STRIPE_SECRET_KEY || 'sk_test_dummy');
 const cors = require('cors');
 const fs = require('fs').promises;
 const path = require('path');
@@ -7,6 +10,45 @@ const { exec } = require('child_process');
 
 const app = express();
 app.use(cors());
+
+// --- STRIPE WEBHOOK (Deve parsare il body raw) ---
+app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {
+  const sig = req.headers['stripe-signature'];
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(req.body, sig, process.env.STRIPE_WEBHOOK_SECRET || 'whsec_dummy');
+  } catch (err) {
+    return res.status(400).send(`Webhook Error: ${err.message}`);
+  }
+
+  try {
+    const users = await readUsers();
+    if (event.type === 'checkout.session.completed') {
+      const session = event.data.object;
+      const email = session.customer_email || session.customer_details?.email;
+      const userIndex = users.findIndex(u => u.email.toLowerCase() === email?.toLowerCase());
+      if (userIndex !== -1) {
+        users[userIndex].stripeCustomerId = session.customer;
+        users[userIndex].stripeSubscriptionId = session.subscription;
+        users[userIndex].subscriptionStatus = 'active';
+        await writeUsers(users);
+      }
+    } else if (event.type === 'customer.subscription.updated' || event.type === 'customer.subscription.deleted') {
+      const subscription = event.data.object;
+      const userIndex = users.findIndex(u => u.stripeCustomerId === subscription.customer);
+      if (userIndex !== -1) {
+        users[userIndex].subscriptionStatus = subscription.status; // 'active', 'canceled', etc.
+        await writeUsers(users);
+      }
+    }
+    res.json({received: true});
+  } catch (e) {
+    console.error("Webhook logic error:", e);
+    res.status(500).end();
+  }
+});
+
+// Parsa JSON per tutte le altre rotte
 app.use(express.json({ limit: '50mb' }));
 
 const PORT = 5001;
@@ -100,39 +142,118 @@ async function getPortfolioData(email) {
   catch (err) {
     if (err.code !== 'ENOENT') throw err;
     try {
+      const users = await readUsers();
+      const user = users.find(u => u.email.toLowerCase() === (email || '').toLowerCase());
+      const isAdmin = user && user.role === 'admin';
+
       const base = JSON.parse(await fs.readFile(PORTFOLIO_JSON, 'utf8'));
-      if (filePath !== PORTFOLIO_JSON) await fs.writeFile(filePath, JSON.stringify(base, null, 2), 'utf8');
-      return base;
+      let toSave = base;
+      if (!isAdmin && filePath !== PORTFOLIO_JSON) {
+        toSave = {};
+        for (const section of Object.keys(base)) {
+          toSave[section] = [];
+        }
+      }
+
+      if (filePath !== PORTFOLIO_JSON) await fs.writeFile(filePath, JSON.stringify(toSave, null, 2), 'utf8');
+      return toSave;
     } catch (baseErr) {
       if (baseErr.code !== 'ENOENT') throw baseErr;
       console.log('Base portfolio.json not found, running parse_numbers.py...');
       const stdout = await runPython(`python3 "${PARSE_SCRIPT}"`);
       const parsed = JSON.parse(stdout);
       await fs.writeFile(PORTFOLIO_JSON, JSON.stringify(parsed, null, 2), 'utf8');
-      if (filePath !== PORTFOLIO_JSON) await fs.writeFile(filePath, JSON.stringify(parsed, null, 2), 'utf8');
-      return parsed;
+      
+      const users = await readUsers();
+      const user = users.find(u => u.email.toLowerCase() === (email || '').toLowerCase());
+      const isAdmin = user && user.role === 'admin';
+
+      let toSave = parsed;
+      if (!isAdmin && filePath !== PORTFOLIO_JSON) {
+        toSave = {};
+        for (const section of Object.keys(parsed)) {
+          toSave[section] = [];
+        }
+      }
+
+      if (filePath !== PORTFOLIO_JSON) await fs.writeFile(filePath, JSON.stringify(toSave, null, 2), 'utf8');
+      return toSave;
     }
   }
 }
 
 // ── Reports index helpers ────────────────────────────────────────────────────
-async function readReportsIndex() {
+function getUserReportsIndexPath(email) {
+  if (!email || email.toLowerCase() === 'alessio199754@gmail.com') return REPORTS_INDEX;
+  const cleanEmail = email.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  return path.join(DATA_DIR, `reports_index_${cleanEmail}.json`);
+}
+
+async function readReportsIndex(email) {
   await ensureReportsDir();
-  try { return JSON.parse(await fs.readFile(REPORTS_INDEX, 'utf8')); }
+  const filePath = getUserReportsIndexPath(email);
+  try { return JSON.parse(await fs.readFile(filePath, 'utf8')); }
   catch (err) { if (err.code === 'ENOENT') return []; throw err; }
 }
-async function writeReportsIndex(index) {
+async function writeReportsIndex(email, index) {
   await ensureReportsDir();
-  await fs.writeFile(REPORTS_INDEX, JSON.stringify(index, null, 2), 'utf8');
+  const filePath = getUserReportsIndexPath(email);
+  await fs.writeFile(filePath, JSON.stringify(index, null, 2), 'utf8');
+}
+
+// ── Onboarding Deals Generator ──────────────────────────────────────────────
+async function injectOnboardingDeals(email) {
+  await ensureReportsDir();
+  const index = await readReportsIndex(email);
+  const id = crypto.randomUUID();
+  const deals = [];
+  let ticket = 900000;
+  const now = new Date();
+  // Genera finti deal per TRIAL_1
+  for(let i=0; i<15; i++) {
+     const isWin = Math.random() > 0.4;
+     deals.push({
+       ticket: ticket++,
+       time: new Date(now.getTime() - Math.random() * 7 * 24 * 3600 * 1000).toISOString(),
+       symbol: 'EURUSD',
+       magic: 'TRIAL_1',
+       profit: isWin ? Math.random() * 50 : -Math.random() * 30,
+       volume: 0.01,
+       type: 0,
+       price: 1.1000,
+       swap: 0,
+       commission: 0
+     });
+  }
+  // Genera finti deal per TRIAL_2
+  for(let i=0; i<10; i++) {
+     const isWin = Math.random() > 0.5;
+     deals.push({
+       ticket: ticket++,
+       time: new Date(now.getTime() - Math.random() * 7 * 24 * 3600 * 1000).toISOString(),
+       symbol: 'NAS100',
+       magic: 'TRIAL_2',
+       profit: isWin ? Math.random() * 150 : -Math.random() * 100,
+       volume: 0.05,
+       type: 0,
+       price: 15000,
+       swap: 0,
+       commission: -1
+     });
+  }
+  
+  await fs.writeFile(path.join(REPORTS_DIR, `${id}.json`), JSON.stringify({ id, name: 'Dati di Prova (Onboarding)', uploadedAt: now.toISOString(), deals }, null, 2));
+  index.push({ id, name: 'Dati di Prova (Onboarding)', uploadedAt: now.toISOString(), tradeCount: deals.length });
+  await writeReportsIndex(email, index);
 }
 
 // ── Merge all deals: manual reports + MT5 live (for portfolio_manager.py) ───
-async function getAllDeals() {
+async function getAllDeals(email) {
   const allDeals = new Map(); // ticket → deal (deduplicated)
 
   // 1. All manual reports
   try {
-    const index = await readReportsIndex();
+    const index = await readReportsIndex(email);
     for (const meta of index) {
       const filePath = path.join(REPORTS_DIR, `${meta.id}.json`);
       try {
@@ -145,7 +266,10 @@ async function getAllDeals() {
 
   // 2. MT5 live data
   try {
-    const liveDeals = JSON.parse(await fs.readFile(MT5_DEALS_JSON, 'utf8'));
+    const cleanEmail = (email || '').toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const mt5File = (!email || email.toLowerCase() === 'alessio199754@gmail.com') ? MT5_DEALS_JSON : path.join(DATA_DIR, `mt5_deals_${cleanEmail}.json`);
+    let liveDeals = [];
+    try { liveDeals = JSON.parse(await fs.readFile(mt5File, 'utf8')); } catch (e) {}
     liveDeals.forEach(d => allDeals.set(d.ticket, d));
   } catch (e) {}
 
@@ -164,12 +288,65 @@ app.post('/api/auth/signup', async (req, res) => {
     if (users.find(u => u.email.toLowerCase() === email.toLowerCase()))
       return res.status(400).json({ error: 'Questo indirizzo email è già registrato' });
     let finalSub = subscription || 'Standard (3.99€/mese)';
-    if (email.toLowerCase() === 'alessio199754@gmail.com') finalSub = 'Admin (Gratuito)';
-    const newUser = { id: crypto.randomUUID(), email: email.toLowerCase(), passwordHash: hashPassword(password), subscription: finalSub };
+    let finalRole = 'user';
+    let trialEndsAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString(); // 7 giorni
+    if (email.toLowerCase() === 'alessio199754@gmail.com') {
+      finalSub = 'Admin (Gratuito)';
+      finalRole = 'admin';
+      trialEndsAt = new Date(Date.now() + 3650 * 24 * 60 * 60 * 1000).toISOString(); // 10 anni per admin
+    }
+    const newUser = { 
+      id: crypto.randomUUID(), 
+      email: email.toLowerCase(), 
+      passwordHash: hashPassword(password), 
+      subscription: finalSub, 
+      role: finalRole,
+      trialEndsAt,
+      subscriptionStatus: 'trialing'
+    };
     users.push(newUser);
     await writeUsers(users);
-    await getPortfolioData(email);
-    res.json({ success: true, user: { email: newUser.email, subscription: newUser.subscription } });
+    
+    // Assegna il portafoglio: admin copia quello globale, user ne ottiene uno pulito di onboarding
+    if (finalRole !== 'admin') {
+      const trialPortfolio = {
+        "Strategie di Prova": [
+          {
+            "id": "trial_1",
+            "mercato": "EURUSD",
+            "nome": "Trend Follower Pro",
+            "tf": "H1",
+            "magic": "TRIAL_1",
+            "note": "Strategia dimostrativa (Onboarding)",
+            "lotti": 0.01,
+            "mc_dd": 5,
+            "real_dd": null
+          },
+          {
+            "id": "trial_2",
+            "mercato": "NAS100",
+            "nome": "Breakout Scalper",
+            "tf": "M15",
+            "magic": "TRIAL_2",
+            "note": "Strategia dimostrativa (Onboarding)",
+            "lotti": 0.05,
+            "mc_dd": 10,
+            "real_dd": null
+          }
+        ]
+      };
+      await ensureDataDir();
+      const cleanEmail = email.toLowerCase().replace(/[^a-z0-9]/g, '_');
+      const filePath = path.join(DATA_DIR, `portfolio_${cleanEmail}.json`);
+      await fs.writeFile(filePath, JSON.stringify(trialPortfolio, null, 2));
+      
+      // Initialize isolated onboarding deals for this user
+      await injectOnboardingDeals(email);
+    } else {
+      await getPortfolioData(email);
+    }
+    
+    res.json({ success: true, user: { email: newUser.email, subscription: newUser.subscription, role: newUser.role, trialEndsAt: newUser.trialEndsAt, subscriptionStatus: newUser.subscriptionStatus } });
   } catch (err) {
     console.error('Signup error:', err);
     res.status(500).json({ error: 'Errore durante la registrazione', details: err.message });
@@ -184,9 +361,200 @@ app.post('/api/auth/login', async (req, res) => {
     const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
     if (!user || user.passwordHash !== hashPassword(password))
       return res.status(400).json({ error: 'Credenziali non valide' });
-    res.json({ success: true, user: { email: user.email, subscription: user.subscription } });
+    
+    // Assegna il ruolo per retrocompatibilità con account esistenti
+    const userRole = user.role || (user.email.toLowerCase() === 'alessio199754@gmail.com' ? 'admin' : 'user');
+    const trialEndsAt = user.trialEndsAt || new Date(Date.now() - 1000).toISOString(); // Expired default for old
+    const subStatus = user.subscriptionStatus || 'none';
+    
+    res.json({ success: true, user: { email: user.email, subscription: user.subscription, role: userRole, trialEndsAt, subscriptionStatus: subStatus } });
   } catch (err) {
     res.status(500).json({ error: 'Errore durante il login', details: err.message });
+  }
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   AUTHENTICATION ENDPOINTS (ME) AND STRIPE
+   ───────────────────────────────────────────────────────────────────────────── */
+
+app.get('/api/auth/me', async (req, res) => {
+  const email = req.headers['x-user-email'];
+  if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
+  try {
+    const users = await readUsers();
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!user) return res.status(404).json({ error: 'Utente non trovato' });
+    const userRole = user.role || (user.email.toLowerCase() === 'alessio199754@gmail.com' ? 'admin' : 'user');
+    const trialEndsAt = user.trialEndsAt || new Date(Date.now() - 1000).toISOString();
+    const subStatus = user.subscriptionStatus || 'none';
+    res.json({ success: true, user: { email: user.email, subscription: user.subscription, role: userRole, trialEndsAt, subscriptionStatus: subStatus } });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore durante il recupero dei dati utente' });
+  }
+});
+
+app.put('/api/auth/password', async (req, res) => {
+  const email = req.headers['x-user-email'];
+  if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
+  try {
+    const { oldPassword, newPassword } = req.body;
+    if (!oldPassword || !newPassword) return res.status(400).json({ error: 'Vecchia e nuova password sono obbligatorie' });
+    
+    const users = await readUsers();
+    const userIndex = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+    if (userIndex === -1) return res.status(404).json({ error: 'Utente non trovato' });
+    
+    if (users[userIndex].passwordHash !== hashPassword(oldPassword)) {
+      return res.status(400).json({ error: 'La vecchia password non è corretta' });
+    }
+    
+    users[userIndex].passwordHash = hashPassword(newPassword);
+    await writeUsers(users);
+    
+    res.json({ success: true, message: 'Password aggiornata con successo' });
+  } catch (err) {
+    console.error('Password change error:', err);
+    res.status(500).json({ error: 'Errore durante il cambio password', details: err.message });
+  }
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────
+   ADMIN ENDPOINTS
+   ───────────────────────────────────────────────────────────────────────────── */
+app.get('/api/admin/users', async (req, res) => {
+  const email = req.headers['x-user-email'];
+  if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
+  try {
+    const users = await readUsers();
+    const reqUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!reqUser || reqUser.role !== 'admin') {
+      return res.status(403).json({ error: 'Accesso negato. Permessi di amministratore richiesti.' });
+    }
+    
+    // Rimuoviamo gli hash delle password e le chiavi Stripe prima di inviarli al client
+    const safeUsers = users.map(u => ({
+      email: u.email,
+      role: u.role || (u.email.toLowerCase() === 'alessio199754@gmail.com' ? 'admin' : 'user'),
+      subscription: u.subscription || 'Free',
+      subscriptionStatus: u.subscriptionStatus || 'none',
+      trialEndsAt: u.trialEndsAt
+    }));
+    res.json(safeUsers);
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nel recupero degli utenti', details: err.message });
+  }
+});
+
+app.put('/api/admin/users/:userEmail', async (req, res) => {
+  const email = req.headers['x-user-email'];
+  if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
+  try {
+    const users = await readUsers();
+    const reqUser = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!reqUser || reqUser.role !== 'admin') {
+      return res.status(403).json({ error: 'Accesso negato. Permessi di amministratore richiesti.' });
+    }
+    
+    const targetEmail = req.params.userEmail.toLowerCase();
+    const userIndex = users.findIndex(u => u.email.toLowerCase() === targetEmail);
+    if (userIndex === -1) return res.status(404).json({ error: 'Utente non trovato' });
+    
+    const { role, subscription } = req.body;
+    if (role) users[userIndex].role = role;
+    if (subscription) {
+      users[userIndex].subscription = subscription;
+      if (subscription === 'Premium') {
+        users[userIndex].subscriptionStatus = 'active';
+      } else if (subscription === 'Free') {
+        users[userIndex].subscriptionStatus = 'none';
+      }
+    }
+    
+    await writeUsers(users);
+    res.json({ success: true, message: 'Utente aggiornato' });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore nell\'aggiornamento utente', details: err.message });
+  }
+});
+
+app.post('/api/stripe/create-checkout-session', async (req, res) => {
+  const email = req.headers['x-user-email'];
+  if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
+  try {
+    if ((process.env.STRIPE_SECRET_KEY || 'sk_test_dummy') === 'sk_test_dummy') {
+      return res.json({ url: '/api/stripe/dummy-checkout?email=' + encodeURIComponent(email) });
+    }
+    
+    const session = await stripe.checkout.sessions.create({
+      payment_method_types: ['card'],
+      mode: 'subscription',
+      line_items: [{
+        price: process.env.STRIPE_PRICE_ID || 'price_dummy',
+        quantity: 1,
+      }],
+      customer_email: email,
+      success_url: req.headers.origin + '/?session_id={CHECKOUT_SESSION_ID}',
+      cancel_url: req.headers.origin + '/',
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore Stripe Checkout', details: err.message });
+  }
+});
+
+app.post('/api/stripe/create-portal-session', async (req, res) => {
+  const email = req.headers['x-user-email'];
+  if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
+  try {
+    if ((process.env.STRIPE_SECRET_KEY || 'sk_test_dummy') === 'sk_test_dummy') {
+      return res.json({ url: '/api/stripe/dummy-portal?email=' + encodeURIComponent(email) });
+    }
+
+    const users = await readUsers();
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    if (!user || !user.stripeCustomerId) {
+      return res.status(400).json({ error: 'Nessun cliente Stripe trovato per questo utente. Effettua prima l\'abbonamento.' });
+    }
+    const session = await stripe.billingPortal.sessions.create({
+      customer: user.stripeCustomerId,
+      return_url: req.headers.origin + '/',
+    });
+    res.json({ url: session.url });
+  } catch (err) {
+    res.status(500).json({ error: 'Errore Stripe Portal', details: err.message });
+  }
+});
+
+// FAKE STRIPE ROUTES FOR TESTING
+app.get('/api/stripe/dummy-checkout', async (req, res) => {
+  const email = req.query.email;
+  try {
+    const users = await readUsers();
+    const userIndex = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+    if (userIndex !== -1) {
+      users[userIndex].subscriptionStatus = 'active';
+      users[userIndex].subscription = 'Premium';
+      await writeUsers(users);
+    }
+    res.send('<html><body><h2>Pagamento (Simulato) Completato!</h2><p>Il tuo account è ora Premium.</p><script>setTimeout(() => window.location.href="/", 2000)</script></body></html>');
+  } catch (e) {
+    res.redirect('/');
+  }
+});
+
+app.get('/api/stripe/dummy-portal', async (req, res) => {
+  const email = req.query.email;
+  try {
+    const users = await readUsers();
+    const userIndex = users.findIndex(u => u.email.toLowerCase() === email.toLowerCase());
+    if (userIndex !== -1) {
+      users[userIndex].subscriptionStatus = 'none';
+      users[userIndex].subscription = 'Free';
+      await writeUsers(users);
+    }
+    res.send('<html><body><h2>Abbonamento (Simulato) Annullato!</h2><p>Sei tornato al piano Free.</p><script>setTimeout(() => window.location.href="/", 2000)</script></body></html>');
+  } catch (e) {
+    res.redirect('/');
   }
 });
 
@@ -252,7 +620,8 @@ app.post('/api/export', async (req, res) => {
 // GET /api/reports — list all saved reports (metadata only, no deals array)
 app.get('/api/reports', async (req, res) => {
   try {
-    const index = await readReportsIndex();
+    const email = req.headers['x-user-email'];
+    const index = await readReportsIndex(email);
     res.json(index);
   } catch (err) {
     res.status(500).json({ error: 'Impossibile leggere i report salvati', details: err.message });
@@ -267,7 +636,7 @@ app.post('/api/reports', async (req, res) => {
     if (!name || !Array.isArray(deals))
       return res.status(400).json({ error: 'Payload non valido: name e deals[] sono obbligatori' });
 
-    const index = await readReportsIndex();
+    const index = await readReportsIndex(email);
 
     // Enforce 10-report limit
     if (index.length >= MAX_REPORTS) {
@@ -289,7 +658,7 @@ app.post('/api/reports', async (req, res) => {
     // Update index with metadata (no deals array, to keep index light)
     const meta = { id, name, uploadedAt: now, tradeCount: deals.length };
     index.push(meta);
-    await writeReportsIndex(index);
+    await writeReportsIndex(email, index);
 
     console.log(`[Reports] Salvato report "${name}" (${deals.length} trade). Slot: ${index.length}/${MAX_REPORTS}`);
     invalidateCache(email); // Invalidate cache on new report upload
@@ -305,7 +674,7 @@ app.delete('/api/reports/:id', async (req, res) => {
   try {
     const email = req.headers['x-user-email'];
     const { id } = req.params;
-    let index = await readReportsIndex();
+    let index = await readReportsIndex(email);
     const exists = index.find(r => r.id === id);
     if (!exists) return res.status(404).json({ error: 'Report non trovato' });
 
@@ -315,7 +684,7 @@ app.delete('/api/reports/:id', async (req, res) => {
 
     // Update index
     index = index.filter(r => r.id !== id);
-    await writeReportsIndex(index);
+    await writeReportsIndex(email, index);
 
     console.log(`[Reports] Eliminato report "${exists.name}". Slot rimanenti: ${MAX_REPORTS - index.length}/${MAX_REPORTS}`);
     invalidateCache(email); // Invalidate cache on report deletion
@@ -331,7 +700,7 @@ app.post('/api/reports/clear-all', async (req, res) => {
   if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
 
   try {
-    const index = await readReportsIndex();
+    const index = await readReportsIndex(email);
     
     // Delete each manual report file listed in index
     for (const report of index) {
@@ -344,7 +713,7 @@ app.post('/api/reports/clear-all', async (req, res) => {
     }
     
     // Clear index
-    await writeReportsIndex([]);
+    await writeReportsIndex(email, []);
     
     console.log(`[Reports] Svuotati tutti i report manuali per ${email}. Dati MT5 intatti.`);
     invalidateCache(email); // Invalidate cache on clearing all reports
@@ -384,20 +753,24 @@ app.get('/api/mt5-ea/download', (req, res) => {
 app.post('/api/mt5-deals', async (req, res) => {
   try {
     const deals = req.body;
+    const email = req.query.email || ''; // Passato tramite query string o payload? Facciamo fallback.
+    const cleanEmail = email.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const mt5File = (!email || email.toLowerCase() === 'alessio199754@gmail.com') ? MT5_DEALS_JSON : path.join(DATA_DIR, `mt5_deals_${cleanEmail}.json`);
+    
     if (!Array.isArray(deals)) return res.status(400).json({ error: 'Il payload deve essere un array di deals' });
     await ensureDataDir();
     let existing = [];
-    try { existing = JSON.parse(await fs.readFile(MT5_DEALS_JSON, 'utf8')); }
+    try { existing = JSON.parse(await fs.readFile(mt5File, 'utf8')); }
     catch (e) { if (e.code !== 'ENOENT') throw e; }
     const dealMap = new Map();
     existing.forEach(d => dealMap.set(d.ticket, d));
     deals.forEach(d => dealMap.set(d.ticket, d));
     const merged = Array.from(dealMap.values());
     const hasNewDeals = merged.length !== existing.length;
-    await fs.writeFile(MT5_DEALS_JSON, JSON.stringify(merged, null, 2), 'utf8');
+    await fs.writeFile(mt5File, JSON.stringify(merged, null, 2), 'utf8');
     console.log(`[MT5 Bridge] Ricevute ${deals.length} op. Totale: ${merged.length}`);
     if (hasNewDeals) {
-      invalidateCache(); // Invalidate global cache since we don't have user email on direct EA sync
+      invalidateCache(email);
     } else {
       console.log('[MT5 Bridge] Nessun nuovo deal rilevato. Caches conservate.');
     }
@@ -434,7 +807,7 @@ app.post('/api/portfolio-management/calculate', async (req, res) => {
     await getPortfolioData(email); // seed if missing
 
     // Merge both data sources
-    const allDeals = await getAllDeals();
+    const allDeals = await getAllDeals(email);
     await fs.writeFile(tempDealsPath, JSON.stringify(allDeals, null, 2), 'utf8');
 
     const mgrScript = path.join(SCRIPTS_DIR, 'portfolio_manager.py');
@@ -465,7 +838,9 @@ app.post('/api/portfolio-management/reset-deals', async (req, res) => {
   if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
   try {
     await ensureDataDir();
-    await fs.writeFile(MT5_DEALS_JSON, JSON.stringify([], null, 2), 'utf8');
+    const cleanEmail = email.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+    const mt5File = email.toLowerCase() === 'alessio199754@gmail.com' ? MT5_DEALS_JSON : path.join(DATA_DIR, `mt5_deals_${cleanEmail}.json`);
+    await fs.writeFile(mt5File, JSON.stringify([], null, 2), 'utf8');
     invalidateCache(email); // Invalidate cache on reset deals
     console.log(`[Reset MT5] Dati live EA azzerati da ${email}. Report manuali e parametri MC invariati.`);
     res.json({ success: true, message: 'Dati live MT5 EA azzerati. Report manuali e parametri Monte Carlo preservati.' });
@@ -614,7 +989,7 @@ app.post('/api/equity-chart', async (req, res) => {
     const portfolioPath = getUserPortfolioPath(email);
     await getPortfolioData(email); // seed if missing
 
-    const allDeals = await getAllDeals();
+    const allDeals = await getAllDeals(email);
     await fs.writeFile(tempDealsPath, JSON.stringify(allDeals, null, 2), 'utf8');
 
     const stratIdsJson = JSON.stringify(strategy_ids);
@@ -640,6 +1015,23 @@ app.post('/api/equity-chart', async (req, res) => {
    Usa tasse_trading.py sullo stesso pool di deal: report manuali + MT5 live
    ───────────────────────────────────────────────────────────────────────────── */
 
+// Middleware di autorizzazione per amministratore
+async function requireAdmin(req, res, next) {
+  const email = req.headers['x-user-email'];
+  if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
+  try {
+    const users = await readUsers();
+    const user = users.find(u => u.email.toLowerCase() === email.toLowerCase());
+    const role = user?.role || (email.toLowerCase() === 'alessio199754@gmail.com' ? 'admin' : 'user');
+    if (role !== 'admin') {
+      return res.status(403).json({ error: 'Accesso negato. Permessi di amministratore richiesti.' });
+    }
+    next();
+  } catch (err) {
+    res.status(500).json({ error: 'Errore durante la verifica dei permessi' });
+  }
+}
+
 // Helper: path del file di storage minusvalenze per utente
 function getUserMinusvalenzePath(email) {
   const cleanEmail = email.toLowerCase().replace(/[^a-z0-9_-]/g, '_');
@@ -647,7 +1039,7 @@ function getUserMinusvalenzePath(email) {
 }
 
 // GET /api/tasse/minusvalenze — legge le minusvalenze pregresse salvate
-app.get('/api/tasse/minusvalenze', async (req, res) => {
+app.get('/api/tasse/minusvalenze', requireAdmin, async (req, res) => {
   const email = req.headers['x-user-email'];
   if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
   try {
@@ -665,7 +1057,7 @@ app.get('/api/tasse/minusvalenze', async (req, res) => {
 });
 
 // POST /api/tasse/minusvalenze — aggiunge/aggiorna una minusvalenza pregressa manuale
-app.post('/api/tasse/minusvalenze', async (req, res) => {
+app.post('/api/tasse/minusvalenze', requireAdmin, async (req, res) => {
   const email = req.headers['x-user-email'];
   if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
   try {
@@ -685,7 +1077,7 @@ app.post('/api/tasse/minusvalenze', async (req, res) => {
 });
 
 // DELETE /api/tasse/minusvalenze/:anno — rimuove una minusvalenza pregressa per anno
-app.delete('/api/tasse/minusvalenze/:anno', async (req, res) => {
+app.delete('/api/tasse/minusvalenze/:anno', requireAdmin, async (req, res) => {
   const email = req.headers['x-user-email'];
   if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
   try {
@@ -703,7 +1095,7 @@ app.delete('/api/tasse/minusvalenze/:anno', async (req, res) => {
 });
 
 // POST /api/tasse/calcola — esegue il motore fiscale sui deal dell'utente
-app.post('/api/tasse/calcola', async (req, res) => {
+app.post('/api/tasse/calcola', requireAdmin, async (req, res) => {
   const email = req.headers['x-user-email'];
   if (!email) return res.status(401).json({ error: 'Utente non autorizzato' });
 
@@ -719,7 +1111,7 @@ app.post('/api/tasse/calcola', async (req, res) => {
     // i totali fiscali con double-counting.
     let allDeals;
     try {
-      const index = await readReportsIndex();
+      const index = await readReportsIndex(email);
       if (index.length > 0) {
         // Ha report manuali → usa solo quelli per il fiscale
         const dealsMap = new Map();
@@ -733,10 +1125,10 @@ app.post('/api/tasse/calcola', async (req, res) => {
         allDeals = Array.from(dealsMap.values());
       } else {
         // Nessun report manuale → fallback sui deal live
-        allDeals = await getAllDeals();
+        allDeals = await getAllDeals(email);
       }
     } catch (e) {
-      allDeals = await getAllDeals();
+      allDeals = await getAllDeals(email);
     }
 
     if (allDeals.length === 0) {

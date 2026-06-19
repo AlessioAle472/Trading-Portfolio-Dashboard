@@ -784,3 +784,11 @@ input, select, textarea {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+.hover-lift {
+  transition: transform var(--transition-fast), box-shadow var(--transition-fast), background var(--transition-fast);
+}
+.hover-lift:hover {
+  transform: translateY(-2px);
+  box-shadow: var(--shadow-glow);
+}

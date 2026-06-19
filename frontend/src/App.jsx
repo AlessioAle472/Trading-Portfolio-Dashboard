@@ -8,7 +8,10 @@ import ReportAnalysis from './pages/ReportAnalysis';
 import PortfolioManagement from './pages/PortfolioManagement';
 import EquityCharts from './pages/EquityCharts';
 import TasseTrading from './pages/TasseTrading';
-import { Download, RefreshCw, Plus, Save, AlertCircle, FileSpreadsheet, Edit3, Trash2, LogOut, User, Sparkles, LayoutDashboard, TrendingUp, BarChart2, Receipt } from 'lucide-react';
+import AccountSettings from './pages/AccountSettings';
+import UsersManagement from './pages/UsersManagement';
+import Paywall from './components/Paywall';
+import { Download, RefreshCw, Plus, Save, AlertCircle, FileSpreadsheet, Edit3, Trash2, LogOut, User, Sparkles, LayoutDashboard, TrendingUp, BarChart2, Receipt, ExternalLink, Settings, Users } from 'lucide-react';
 
 export default function App() {
   const [user, setUser] = useState(() => {
@@ -21,6 +24,7 @@ export default function App() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [currentView, setCurrentView] = useState('portfolio'); // 'portfolio' | 'analysis' | 'management' | 'charts' | 'taxes'
+  const [impersonateMode, setImpersonateMode] = useState(null); // null | 'free' | 'premium'
   const [pendingRiskRefresh, setPendingRiskRefresh] = useState(false);
   const [lastUploadedTradesCount, setLastUploadedTradesCount] = useState(0);
   const [lastUploadedFileName, setLastUploadedFileName] = useState('');
@@ -104,12 +108,73 @@ export default function App() {
     }
   };
 
+  const loadUserRefresh = async (currentUser) => {
+    if (!currentUser) return;
+    try {
+      const res = await fetch('/api/auth/me', { headers: { 'x-user-email': currentUser.email } });
+      if (res.ok) {
+        const data = await res.json();
+        setUser(data.user);
+        localStorage.setItem('trading_user', JSON.stringify(data.user));
+      }
+    } catch (e) {}
+  };
+
   useEffect(() => {
     if (user) {
+      loadUserRefresh(user);
       loadPortfolio();
       loadManagementStats();
     }
-  }, [user]);
+  }, []); // Only run once on mount for the refresh
+
+  const effectiveUser = React.useMemo(() => {
+    if (!user) return null;
+    if (user.role !== 'admin' || !impersonateMode) return user;
+    if (impersonateMode === 'free') {
+      return { ...user, role: 'user', subscription: 'Free', trialEndsAt: new Date(Date.now() - 1000).toISOString(), subscriptionStatus: 'none' };
+    }
+    if (impersonateMode === 'premium') {
+      return { ...user, role: 'user', subscription: 'Premium', subscriptionStatus: 'active' };
+    }
+    return user;
+  }, [user, impersonateMode]);
+
+  const effectivePortfolioData = React.useMemo(() => {
+    if (!portfolioData) return null;
+    if (impersonateMode) {
+      const empty = {};
+      for (const key of Object.keys(portfolioData)) {
+        empty[key] = [];
+      }
+      return empty;
+    }
+    return portfolioData;
+  }, [portfolioData, impersonateMode]);
+
+  const effectiveManagementData = React.useMemo(() => {
+    if (!managementData) return null;
+    if (impersonateMode) {
+      return {
+        ...managementData,
+        strategies: [],
+        totals: {
+          total_profit: 0,
+          total_dd: 0,
+          total_trades: 0,
+          total_live_strategies: 0
+        }
+      };
+    }
+    return managementData;
+  }, [managementData, impersonateMode]);
+
+  useEffect(() => {
+    if ((currentView === 'taxes' || currentView === 'users') && effectiveUser?.role !== 'admin') {
+      setCurrentView('portfolio');
+      showToast('Accesso negato. Permessi di amministratore richiesti.');
+    }
+  }, [currentView, effectiveUser]);
 
   const showToast = (message) => {
     setToast(message);
@@ -121,6 +186,9 @@ export default function App() {
   const handleAuthSuccess = (authenticatedUser) => {
     localStorage.setItem('trading_user', JSON.stringify(authenticatedUser));
     setUser(authenticatedUser);
+    loadUserRefresh(authenticatedUser); // Refresh per prendere i campi Stripe
+    loadPortfolio();
+    loadManagementStats();
   };
 
   const handleLogout = () => {
@@ -341,10 +409,47 @@ export default function App() {
     return <Auth onAuthSuccess={handleAuthSuccess} />;
   }
 
+  // Stripe Handlers
+  const handleSubscribe = async () => {
+    try {
+      const res = await fetch('/api/stripe/create-checkout-session', {
+        method: 'POST',
+        headers: { 'x-user-email': user.email }
+      });
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+      else alert(data.error || "Errore durante l'apertura del checkout.");
+    } catch (e) {
+      alert("Errore di connessione a Stripe.");
+    }
+  };
+
+  const handleManageSubscription = async () => {
+    try {
+      const res = await fetch('/api/stripe/create-portal-session', {
+        method: 'POST',
+        headers: { 'x-user-email': user.email }
+      });
+      const data = await res.json();
+      if (data.url) window.location.href = data.url;
+      else alert(data.error || "Errore durante l'apertura del portale.");
+    } catch (e) {
+      alert("Errore di connessione a Stripe.");
+    }
+  };
+
+  const isBlocked = () => {
+    if (!effectiveUser) return false;
+    if (effectiveUser.role === 'admin') return false;
+    const isTrialExpired = new Date() > new Date(effectiveUser.trialEndsAt);
+    const isSubActive = effectiveUser.subscriptionStatus === 'active';
+    return isTrialExpired && !isSubActive;
+  };
+
   // Get style color for subscription badge
   const getSubColor = () => {
-    if (user.subscription.includes('Admin')) return 'var(--accent-gold)';
-    if (user.subscription.includes('Premium')) return '#8b5cf6'; // Violet
+    if (effectiveUser.subscription.includes('Admin')) return 'var(--accent-gold)';
+    if (effectiveUser.subscription.includes('Premium')) return '#8b5cf6'; // Violet
     return 'var(--accent-blue)';
   };
 
@@ -362,18 +467,25 @@ export default function App() {
 
         {/* User profile & controls */}
         <div style={{ display: 'flex', alignItems: 'center', gap: '1.25rem' }}>
-          <div style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '0.65rem',
-            padding: '0.5rem 1rem',
-            background: 'rgba(255,255,255,0.03)',
-            border: '1px solid var(--border-color)',
-            borderRadius: '12px'
-          }}>
-            <User size={14} color="var(--text-muted)" />
+          <div 
+            onClick={() => setCurrentView('settings')}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '0.65rem',
+              padding: '0.5rem 1rem',
+              background: currentView === 'settings' ? 'rgba(139, 92, 246, 0.15)' : 'rgba(255,255,255,0.03)',
+              border: `1px solid ${currentView === 'settings' ? 'rgba(139, 92, 246, 0.5)' : 'var(--border-color)'}`,
+              borderRadius: '12px',
+              cursor: 'pointer',
+              transition: 'all 0.2s ease',
+            }}
+            className="user-profile-badge hover-lift"
+            title="Impostazioni Account"
+          >
+            <Settings size={16} color={currentView === 'settings' ? '#8b5cf6' : 'var(--text-muted)'} />
             <div style={{ fontSize: '0.85rem' }}>
-              <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>{user.email}</div>
+              <div style={{ fontWeight: 600, color: 'var(--text-bright)' }}>{effectiveUser.email}</div>
               <div style={{ 
                 fontSize: '0.7rem', 
                 color: getSubColor(), 
@@ -384,8 +496,8 @@ export default function App() {
                 gap: '0.2rem',
                 marginTop: '0.05rem'
               }}>
-                {(user.subscription.includes('Premium') || user.subscription.includes('Admin')) && <Sparkles size={8} />}
-                {user.subscription}
+                {(effectiveUser.subscription.includes('Premium') || effectiveUser.subscription.includes('Admin')) && <Sparkles size={8} />}
+                {effectiveUser.subscription}
               </div>
             </div>
           </div>
@@ -444,18 +556,30 @@ export default function App() {
               Grafici Equity
             </button>
 
-            <button 
-              onClick={() => setCurrentView('taxes')} 
-              className={`btn ${currentView === 'taxes' ? 'btn-primary' : 'btn-secondary'}`}
-              style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: currentView === 'taxes' ? undefined : 'rgba(251,146,60,0.5)', color: currentView !== 'taxes' ? '#fb923c' : undefined }}
-              title="Calcolo imposta sostitutiva 26%"
-            >
-              <Receipt size={16} />
-              Tasse Trading
-            </button>
+            {effectiveUser?.role === 'admin' && (
+              <>
+                <button 
+                  onClick={() => setCurrentView('taxes')} 
+                  className={`btn ${currentView === 'taxes' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: currentView === 'taxes' ? undefined : 'rgba(251,146,60,0.5)', color: currentView !== 'taxes' ? '#fb923c' : undefined }}
+                  title="Calcolo imposta sostitutiva 26%"
+                >
+                  <Receipt size={16} />
+                  Tasse Trading
+                </button>
+                <button 
+                  onClick={() => setCurrentView('users')} 
+                  className={`btn ${currentView === 'users' ? 'btn-primary' : 'btn-secondary'}`}
+                  style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', borderColor: currentView === 'users' ? undefined : 'rgba(236,72,153,0.5)', color: currentView !== 'users' ? '#ec4899' : undefined }}
+                  title="Gestione Utenti e Abbonamenti"
+                >
+                  <Users size={16} />
+                  Gestione Utenti
+                </button>
+              </>
+            )}
 
-
-            {currentView === 'portfolio' && (
+            {currentView === 'portfolio' && !isBlocked() && (
               <>
                 <button onClick={handleExportExcel} className="btn btn-primary" title="Esporta in Excel">
                   <Download size={16} />
@@ -472,17 +596,55 @@ export default function App() {
               </>
             )}
 
+            {!isBlocked() && effectiveUser?.role !== 'admin' && (
+              <button onClick={handleManageSubscription} className="btn btn-secondary" style={{ borderColor: 'var(--accent-blue)', color: 'var(--accent-blue)' }} title="Gestisci Abbonamento">
+                <ExternalLink size={16} />
+              </button>
+            )}
+
             <button onClick={handleLogout} className="btn btn-secondary" style={{ padding: '0.6rem' }} title="Esci">
               <LogOut size={16} />
             </button>
           </div>
         </div>
+        
+        {/* Impersonation Admin Bar */}
+        {user?.role === 'admin' && (
+          <div style={{ 
+            marginTop: '1rem', 
+            padding: '0.5rem 1rem', 
+            background: 'rgba(245, 158, 11, 0.1)', 
+            border: '1px solid rgba(245, 158, 11, 0.3)', 
+            borderRadius: '10px', 
+            display: 'flex', 
+            alignItems: 'center', 
+            gap: '1rem' 
+          }}>
+            <span style={{ fontSize: '0.8rem', color: 'var(--color-warn)', fontWeight: 600, textTransform: 'uppercase' }}>Visualizza Come:</span>
+            <select 
+              value={impersonateMode || ''} 
+              onChange={e => setImpersonateMode(e.target.value || null)}
+              className="select-input"
+              style={{ padding: '0.2rem 0.5rem', fontSize: '0.8rem', minWidth: '150px' }}
+            >
+              <option value="">Admin (Predefinito)</option>
+              <option value="free">Utente Base (Free)</option>
+              <option value="premium">Utente Pro (Premium)</option>
+            </select>
+          </div>
+        )}
       </header>
 
       {/* Main Content */}
-      {currentView === 'analysis' ? (
+      {isBlocked() ? (
+        <Paywall 
+          user={effectiveUser} 
+          onSubscribe={handleSubscribe} 
+          onManageSubscription={handleManageSubscription} 
+        />
+      ) : currentView === 'analysis' ? (
         <ReportAnalysis
-          user={user}
+          user={effectiveUser}
           onReportUploaded={(count, fileName) => {
             setPendingRiskRefresh(true);
             setLastUploadedTradesCount(count);
@@ -491,30 +653,35 @@ export default function App() {
         />
       ) : currentView === 'management' ? (
         <PortfolioManagement 
-          portfolioData={portfolioData}
+          portfolioData={effectivePortfolioData}
           onUpdateStrategy={handleUpdateStrategy}
-          user={user}
+          user={effectiveUser}
           pendingRefresh={pendingRiskRefresh}
           lastUploadedTradesCount={lastUploadedTradesCount}
           lastUploadedFileName={lastUploadedFileName}
           onRefreshAcknowledged={() => setPendingRiskRefresh(false)}
-          managementData={managementData}
+          managementData={effectiveManagementData}
           loadingManagement={loadingManagement}
           onReloadManagementData={loadManagementStats}
+          onDeleteStrategy={handleDeleteStrategy}
         />
       ) : currentView === 'charts' ? (
         <EquityCharts
-          portfolioData={portfolioData}
-          user={user}
+          portfolioData={effectivePortfolioData}
+          user={effectiveUser}
         />
       ) : currentView === 'taxes' ? (
-        <TasseTrading user={user} />
+        <TasseTrading user={effectiveUser} />
+      ) : currentView === 'users' ? (
+        <UsersManagement user={effectiveUser} />
+      ) : currentView === 'settings' ? (
+        <AccountSettings user={effectiveUser} onUserUpdated={loadUserRefresh} />
       ) : loading ? (
         <div className="state-container">
           <div className="loading-spinner"></div>
           <p>Caricamento del portafoglio quantitativo...</p>
         </div>
-      ) : error ? (
+) : error ? (
         <div className="state-container" style={{ borderColor: 'var(--color-crit)' }}>
           <AlertCircle size={40} color="var(--color-crit)" />
           <h2>Impossibile caricare il portafoglio</h2>
@@ -523,7 +690,7 @@ export default function App() {
             Riprova
           </button>
         </div>
-      ) : portfolioData ? (
+      ) : effectivePortfolioData ? (
         <>
           {/* Navigation with dynamic sections */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem', width: '100%' }}>
@@ -535,17 +702,17 @@ export default function App() {
               >
                 <span>TUTTE LE SEZIONI</span>
                 <span className="tab-count">
-                  {Object.values(portfolioData).reduce((acc, curr) => acc + curr.length, 0)}
+                  {Object.values(effectivePortfolioData).reduce((acc, curr) => acc + curr.length, 0)}
                 </span>
               </button>
-              {Object.keys(portfolioData).map((sheetName) => (
+              {Object.keys(effectivePortfolioData).map((sheetName) => (
                 <button
                   key={sheetName}
                   onClick={() => setActiveTab(sheetName)}
                   className={`tab-btn ${activeTab === sheetName ? 'active' : ''}`}
                 >
                   <span>{sheetName}</span>
-                  <span className="tab-count">{portfolioData[sheetName].length}</span>
+                  <span className="tab-count">{effectivePortfolioData[sheetName].length}</span>
                 </button>
               ))}
             </nav>
@@ -600,7 +767,7 @@ export default function App() {
 
           {/* Overview Dashboard for Active Tab */}
           {activeTab ? (
-            <Overview data={portfolioData} activeTab={activeTab} />
+            <Overview data={effectivePortfolioData} activeTab={activeTab} />
           ) : (
             <div className="state-container">
               <h3>Nessuna Sezione Disponibile</h3>
@@ -611,7 +778,7 @@ export default function App() {
           {/* Strategy table */}
           {activeTab && (
             <StrategyTable
-              portfolioData={portfolioData}
+              portfolioData={effectivePortfolioData}
               activeTab={activeTab}
               onUpdateStrategy={handleUpdateStrategy}
               onDeleteStrategy={handleDeleteStrategy}
@@ -631,7 +798,7 @@ export default function App() {
         onClose={() => setIsAddStratModalOpen(false)}
         onAddStrategy={handleAddStrategy}
         sheetName={activeTab}
-        portfolioData={portfolioData}
+        portfolioData={effectivePortfolioData}
       />
 
       {/* Section tab management modal */}

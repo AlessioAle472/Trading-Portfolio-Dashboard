@@ -11,7 +11,8 @@ export default function PortfolioManagement({
   onRefreshAcknowledged,
   managementData,
   loadingManagement: loading,
-  onReloadManagementData
+  onReloadManagementData,
+  onDeleteStrategy
 }) {
   const [activeTab, setActiveTab] = useState('TUTTE');
   const [editCell, setEditCell] = useState(null);
@@ -748,7 +749,8 @@ export default function PortfolioManagement({
                   <th style={{ width: '8%', textAlign: 'center' }}>Live DD %</th>
                   <th style={{ width: '8%', textAlign: 'center' }}>Live Profit €</th>
                   <th style={{ width: '10%', textAlign: 'center' }}>Salute</th>
-                  <th style={{ width: '15%', textAlign: 'center' }}>Azione MM</th>
+                  <th style={{ width: '12%', textAlign: 'center' }}>Azione MM</th>
+                  <th style={{ width: '3%', textAlign: 'center' }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -888,7 +890,24 @@ export default function PortfolioManagement({
 
                         {/* MM Action */}
                         <td style={{ textAlign: 'center' }}>
-                          {renderActionBadge(strat.action_text)}
+                          {renderActionBadge(strat.action_text || 'ND')}
+                        </td>
+                        
+                        {/* Delete Action */}
+                        <td style={{ textAlign: 'center' }}>
+                          <button 
+                            onClick={() => {
+                              if (confirm('Vuoi davvero eliminare questa strategia e i suoi dati live?')) {
+                                onDeleteStrategy(strat.section, strat.id);
+                                setTimeout(() => onReloadManagementData(true), 300);
+                              }
+                            }}
+                            className="btn btn-secondary btn-icon-only btn-danger"
+                            style={{ padding: '0.4rem', borderRadius: '8px' }}
+                            title="Elimina strategia"
+                          >
+                            <Trash2 size={14} />
+                          </button>
                         </td>
                       </tr>
                     );
