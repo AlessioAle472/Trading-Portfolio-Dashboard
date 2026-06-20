@@ -162,7 +162,7 @@ async function getPortfolioData(email) {
 
 // Onboarding Deals Generator
 async function injectOnboardingDeals(email) {
-  const id = crypto.randomUUID();
+    const id = new mongoose.Types.ObjectId().toString();
   const deals = [];
   let ticket = 900000;
   const now = new Date();
@@ -636,7 +636,7 @@ app.post('/api/reports', async (req, res) => {
       });
     }
 
-    const id = crypto.randomUUID();
+    const id = new mongoose.Types.ObjectId().toString();
     const newReport = new Report({
       id,
       email: userEmail,
@@ -650,7 +650,7 @@ app.post('/api/reports', async (req, res) => {
     res.json({ success: true, report: { id, name, uploadedAt: newReport.uploadedAt, tradeCount: deals.length }, count: count + 1, max: MAX_REPORTS });
   } catch (err) {
     console.error('Error saving report:', err);
-    res.status(500).json({ error: 'Impossibile salvare il report', details: err.message });
+    res.status(500).json({ error: 'Impossibile salvare il report: ' + err.message });
   }
 });
 
@@ -819,7 +819,7 @@ app.post('/api/groups', async (req, res) => {
       return res.status(400).json({ error: 'name e strategy_ids[] non vuoto sono obbligatori' });
     }
     const newGroup = new Group({
-      id: crypto.randomUUID(),
+      id: new mongoose.Types.ObjectId().toString(),
       email: email.toLowerCase().trim(),
       name: name.trim(),
       description: description || '',
