@@ -9,7 +9,7 @@
 #property description "Expert Advisor per sincronizzare i deal storici di MT5 con il Dashboard in tempo reale."
 
 //--- input parameters
-input string   InpServerURL         = "http://localhost:5001/api/mt5-deals"; // URL del server Express
+input string   InpServerURL         = "https://trading-portfolio-dashboard.onrender.com/api/mt5-deals"; // URL del server Express
 input int      InpDaysBack          = 180;                                   // Giorni di storico da estrarre
 input int      InpCheckIntervalSec  = 10;                                    // Intervallo di controllo modifiche (secondi)
 
@@ -196,7 +196,7 @@ void SendPayload(string json_str)
       int last_err = GetLastError();
       Print("❌ Errore durante l'invio HTTP POST. Codice di risposta HTTP: ", response_code);
       Print("   Codice errore di sistema MT5: ", last_err);
-      Print("   Assicurati di aver aggiunto l'URL 'http://localhost:5001' in Tools -> Options -> Expert Advisors -> Allow WebRequest.");
+      Print("   Assicurati di aver aggiunto l'URL 'https://trading-portfolio-dashboard.onrender.com' in Tools -> Options -> Expert Advisors -> Allow WebRequest.");
    }
 }
 

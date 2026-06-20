@@ -345,7 +345,9 @@ export default function ReportAnalysis({ onReportUploaded, user }) {
   const handleLiveSync = async () => {
     setLoading(true);
     try {
-      const response = await fetch(`${getBackendUrl()}/api/mt5-deals`);
+      const response = await fetch(`${getBackendUrl()}/api/mt5-deals`, {
+        headers: { 'x-user-email': currentUser?.email || '' }
+      });
       if (!response.ok) {
         throw new Error('Impossibile connettersi al server per recuperare i dati live.');
       }
