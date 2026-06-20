@@ -557,7 +557,7 @@ export default function EquityCharts({ portfolioData, user }) {
   const fetchGroups = async () => {
     if (!user) return;
     try {
-      const res = await fetch('/api/groups', { headers: { 'x-user-email': user.email } });
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/groups`, { headers: { 'x-user-email': user.email } });
       if (res.ok) setGroups(await res.json());
     } catch (e) { console.error('Error loading groups:', e); }
   };
@@ -567,7 +567,7 @@ export default function EquityCharts({ portfolioData, user }) {
     setChartError(null);
     setChartData(null);
     try {
-      const res = await fetch('/api/equity-chart', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/equity-chart`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-email': user.email },
         body: JSON.stringify({ mode: type, strategy_ids: ids, group_id: groupId, forceRefresh: force })
@@ -598,14 +598,14 @@ export default function EquityCharts({ portfolioData, user }) {
 
   const handleSaveGroup = async ({ name, description, strategy_ids, editId }) => {
     if (editId) {
-      const res = await fetch(`/api/groups/${editId}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/groups/${editId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json', 'x-user-email': user.email },
         body: JSON.stringify({ name, description, strategy_ids })
       });
       if (res.ok) await fetchGroups();
     } else {
-      const res = await fetch('/api/groups', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'x-user-email': user.email },
         body: JSON.stringify({ name, description, strategy_ids })
@@ -616,7 +616,7 @@ export default function EquityCharts({ portfolioData, user }) {
 
   const handleDeleteGroup = async (groupId, groupName) => {
     if (!window.confirm(`Elimina il gruppo "${groupName}"?`)) return;
-    const res = await fetch(`/api/groups/${groupId}`, {
+    const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/groups/${groupId}`, {
       method: 'DELETE',
       headers: { 'x-user-email': user.email }
     });

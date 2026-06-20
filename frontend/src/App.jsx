@@ -87,7 +87,7 @@ export default function App() {
     if (!user) return;
     setLoadingManagement(true);
     try {
-      const response = await fetch('/api/portfolio-management/calculate', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/portfolio-management/calculate`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -111,7 +111,7 @@ export default function App() {
   const loadUserRefresh = async (currentUser) => {
     if (!currentUser) return;
     try {
-      const res = await fetch('/api/auth/me', { headers: { 'x-user-email': currentUser.email } });
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/auth/me`, { headers: { 'x-user-email': currentUser.email } });
       if (res.ok) {
         const data = await res.json();
         setUser(data.user);
@@ -202,7 +202,7 @@ export default function App() {
   // Helper to save whole portfolio to database
   const savePortfolioToBackend = async (data) => {
     try {
-      const response = await fetch('/api/portfolio', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/portfolio`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -369,7 +369,7 @@ export default function App() {
     showToast('Generazione Excel in corso...');
     
     try {
-      const response = await fetch('/api/export', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/export`, {
         method: 'POST',
         headers: { 
           'Content-Type': 'application/json',
@@ -412,7 +412,7 @@ export default function App() {
   // Stripe Handlers
   const handleSubscribe = async () => {
     try {
-      const res = await fetch('/api/stripe/create-checkout-session', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/stripe/create-checkout-session`, {
         method: 'POST',
         headers: { 'x-user-email': user.email }
       });
@@ -426,7 +426,7 @@ export default function App() {
 
   const handleManageSubscription = async () => {
     try {
-      const res = await fetch('/api/stripe/create-portal-session', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/stripe/create-portal-session`, {
         method: 'POST',
         headers: { 'x-user-email': user.email }
       });

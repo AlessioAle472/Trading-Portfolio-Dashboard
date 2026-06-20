@@ -31,7 +31,7 @@ export default function Auth({ onAuthSuccess }) {
     try {
       if (isLogin) {
         // Login flow
-        const response = await fetch('/api/auth/login', {
+        const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/auth/login`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ email, password })
@@ -66,7 +66,7 @@ export default function Auth({ onAuthSuccess }) {
     setError('');
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/signup', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/auth/signup`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email, password, subscription: subPlan })

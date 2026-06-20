@@ -18,7 +18,7 @@ export default function UsersManagement({ user }) {
   const fetchUsers = async () => {
     setLoading(true);
     try {
-      const res = await fetch('/api/admin/users', {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/admin/users`, {
         headers: { 'x-user-email': user.email }
       });
       if (!res.ok) {
@@ -46,7 +46,7 @@ export default function UsersManagement({ user }) {
   const handleUpdateUser = async () => {
     setUpdating(true);
     try {
-      const res = await fetch(`/api/admin/users/${encodeURIComponent(editUser.email)}`, {
+      const res = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/admin/users/${encodeURIComponent(editUser.email)}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',

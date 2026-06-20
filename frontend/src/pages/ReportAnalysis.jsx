@@ -62,20 +62,7 @@ const normaliseSymbol = (sym) => {
 
 
 const getBackendUrl = () => {
-  const hostname = window.location.hostname;
-  const protocol = window.location.protocol;
-  
-  if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'http://localhost:5001';
-  }
-  
-  const currentPort = window.location.port;
-  let backendPort = '5001';
-  if (currentPort && currentPort !== '5173') {
-    backendPort = currentPort;
-  }
-  
-  return `${protocol}//${hostname}${backendPort ? ':' + backendPort : ''}`;
+  return import.meta.env.VITE_API_URL || '';
 };
 
 export default function ReportAnalysis({ onReportUploaded, user }) {

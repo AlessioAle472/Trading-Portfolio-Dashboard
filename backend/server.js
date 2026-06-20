@@ -21,7 +21,11 @@ mongoose.connect(MONGODB_URI)
   .catch(err => console.error('MongoDB connection error:', err));
 
 const app = express();
-app.use(cors());
+app.use(cors({
+  origin: '*', // Permetti chiamate da qualsiasi origine (incluso Vercel)
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'x-user-email']
+}));
 
 // --- STRIPE WEBHOOK (Deve parsare il body raw) ---
 app.post('/api/stripe/webhook', express.raw({ type: 'application/json' }), async (req, res) => {

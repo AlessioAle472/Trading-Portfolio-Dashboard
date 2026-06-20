@@ -58,7 +58,7 @@ export default function PortfolioManagement({
   const handleResetDeals = async () => {
     setResetting(true);
     try {
-      const response = await fetch('/api/portfolio-management/reset-deals', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/portfolio-management/reset-deals`, {
         method: 'POST',
         headers: { 'x-user-email': user.email }
       });

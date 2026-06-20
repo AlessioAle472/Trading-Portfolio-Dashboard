@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import { Receipt, RefreshCw, AlertTriangle, TrendingDown, TrendingUp, PlusCircle, Trash2, Info, CheckCircle, Calendar, Upload, FileText, X } from 'lucide-react';
 
-const API = 'http://localhost:5001';
+const API = import.meta.env.VITE_API_URL || '';
 
 // ── Helpers ──────────────────────────────────────────────────────────────────
 

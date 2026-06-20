@@ -31,7 +31,7 @@ export default function AccountSettings({ user, onUserUpdated }) {
 
     setLoading(true);
     try {
-      const response = await fetch('/api/auth/password', {
+      const response = await fetch(`${import.meta.env.VITE_API_URL || ''}/api/auth/password`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
