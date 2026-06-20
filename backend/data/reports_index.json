@@ -1,1 +1,26 @@
-[]
+[
+  {
+    "id": "cd5b1650-073a-44cd-bdcc-23b27a316543",
+    "name": "Genetiche Mt4.htm",
+    "uploadedAt": "2026-06-20T06:58:59.680Z",
+    "tradeCount": 8982
+  },
+  {
+    "id": "e4491cff-4878-41c1-8989-08dd48534e9a",
+    "name": "Demo vecchie.htm",
+    "uploadedAt": "2026-06-20T06:59:08.714Z",
+    "tradeCount": 17774
+  },
+  {
+    "id": "5c15028b-0cbb-4a63-a5c6-bc50ff882da1",
+    "name": "Demo news.htm",
+    "uploadedAt": "2026-06-20T06:59:25.206Z",
+    "tradeCount": 6494
+  },
+  {
+    "id": "5895c68a-67e4-4b2c-9f54-1b998cad8c76",
+    "name": "CriptoXAU.htm",
+    "uploadedAt": "2026-06-20T06:59:31.946Z",
+    "tradeCount": 1811
+  }
+]
