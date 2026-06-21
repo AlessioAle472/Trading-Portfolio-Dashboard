@@ -43,8 +43,9 @@ export default function App() {
     setLoading(true);
     setError(null);
     try {
-      const url = isReset ? '/api/portfolio/reset' : '/api/portfolio';
+      const endpoint = isReset ? '/api/portfolio/reset' : '/api/portfolio';
       const method = isReset ? 'POST' : 'GET';
+      const url = `${import.meta.env.VITE_API_URL || ''}${endpoint}`;
       
       const response = await fetch(url, { 
         method,
