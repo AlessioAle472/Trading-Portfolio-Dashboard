@@ -4,7 +4,8 @@
   "description": "Express backend for Trading Portfolio Dashboard",
   "main": "server.js",
   "scripts": {
-    "start": "node server.js"
+    "start": "node server.js",
+    "postinstall": "pip3 install -r scripts/requirements.txt || pip install -r scripts/requirements.txt || echo 'Failed to install Python dependencies'"
   },
   "dependencies": {
     "cors": "^2.8.5",
